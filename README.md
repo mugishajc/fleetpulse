@@ -1,51 +1,76 @@
 # fleetpulse
 
-Event-driven fleet monitoring on Kubernetes. Two Go microservices talk through NATS pub/sub. A GPS ping that crosses a speed threshold becomes an alert in another service without the two ever calling each other over HTTP.
+Event-driven fleet operations on Kubernetes. Four Go microservices, communicating through NATS pub/sub, deployed through Kustomize overlays or a Helm chart, reconciled by Argo CD. Observable in Prometheus and Grafana. Loadable with k6.
 
-Built as a working example of how I lay out a production microservice system: service boundaries by domain, async messaging for cross-service workflows, Prometheus metrics on every pod, Kubernetes manifests with Kustomize overlays per environment, a Helm chart for single-command installs, and Argo CD applications so `main` is what the cluster runs.
+Built as a working reference of how I ship microservice systems: domain-aligned service boundaries, asynchronous messaging between services, metrics and health endpoints on every pod, infrastructure-as-code from the base manifests up to the GitOps application, CI that validates everything on every PR.
 
 ## Services
 
-```
-services/
-  vehicles-api/    Go REST API: register vehicles, record GPS pings, publishes events to NATS
-  alerts-worker/   Go worker: subscribes to speed events and produces Alerts, exposes /metrics
-```
+| Service | Purpose | Port |
+|---|---|---|
+| vehicles-api | vehicle registry, GPS ping ingestion, publishes `fleet.vehicle.registered` and `fleet.speed.over_limit` | 8080 |
+| drivers-service | driver registry, vehicle assignments, publishes `fleet.driver.registered` and `fleet.driver.assigned` | 8080 |
+| trips-service | trip state, GPS sample stream with distance accumulation, geofence breach detection, publishes `fleet.trip.*` | 8080 |
+| alerts-worker | subscribes to speed and trip events, produces alerts, exposes `fleet_alerts_total` metric | 9090 |
 
-Events on NATS:
+## Why NATS and not HTTP between services
 
-- `fleet.vehicle.registered` emitted when a vehicle is created
-- `fleet.speed.over_limit` emitted when a ping arrives with speed > 100 kph
+Any service can be down while another service accepts work. A trip can be started while the alerts worker is being redeployed; the alert will be produced when the worker comes back. A sync HTTP call would couple their uptimes.
+
+The alerts worker subscribes to a queue group, so scaling it to N replicas does not produce N copies of each alert.
+
+## Geofencing
+
+trips-service carries a small `geo` package with the haversine distance formula and a circular `Geofence.Contains`. Default fence is a 12 km radius around Kigali's CBD. Each GPS sample is checked; a point outside the fence publishes `fleet.trip.geofence_breach`. Tested against known distances (Kigali to Butare is ~133 km).
 
 ## Run it locally
 
 ```bash
 docker compose up --build
-# register a vehicle
-curl -X POST localhost:8080/vehicles \
-  -H 'content-type: application/json' \
-  -d '{"id":"v1","plate":"RAD123A","make":"Toyota","model":"Hiace","owner":"Jean"}'
-# send a ping above the limit
-curl -X POST localhost:8080/vehicles/v1/pings \
-  -H 'content-type: application/json' \
-  -d '{"lat":-1.95,"lon":30.06,"speed_kph":135}'
-# alerts-worker logs the alert, and fleet_alerts_total is scrapable on :9090/metrics
+./scripts/seed.sh        # 50 vehicles, 20 drivers, 200 trips
+k6 run --vus 20 --duration 30s scripts/k6/smoke.js
 ```
+
+Endpoints, abbreviated:
+
+```
+# vehicles-api on :8080
+POST /vehicles                    register
+POST /vehicles/{id}/pings         record a GPS ping
+
+# drivers-service on :8081
+POST /drivers
+POST /drivers/{id}/assign         body: {"vehicle_id": "..."}
+POST /drivers/{id}/end-assignment
+GET  /vehicles/{vehicleId}/driver
+
+# trips-service on :8082
+POST /trips                       body: {"id","vehicle_id","driver_id"}
+POST /trips/{id}/samples
+POST /trips/{id}/end
+GET  /vehicles/{vehicleId}/trips
+```
+
+Each service also exposes `/healthz`, `/readyz` and `/metrics`.
 
 ## Tests
 
-Each service runs independently. The HTTP server is unit-tested against a fake NATS publisher so no broker is needed:
+Each service is independently tested. Fakes stand in for NATS so no broker is needed.
 
 ```bash
-cd services/vehicles-api && go test -race ./...
-cd services/alerts-worker && go test -race ./...
+cd services/vehicles-api    && go test -race ./...
+cd services/drivers-service && go test -race ./...
+cd services/trips-service   && go test -race ./...
+cd services/alerts-worker   && go test -race ./...
 ```
 
-Covered:
+What is covered:
 
-- store: register, duplicate-plate rejection, not-found, ping-updates-last-seen
-- HTTP: register + retrieve, overspeed ping publishes an event, normal speed does not, ping on unknown vehicle is 404
-- alerts: overspeed warning vs critical by speed, missing vehicle id is rejected, bad JSON is rejected
+- vehicles-api: store round-trips, duplicate-plate rejection, overspeed publishes an event, normal speed does not, ping on unknown vehicle is 404
+- drivers-service: register and retrieve, duplicate license is 409, double booking a vehicle is 409, end-assignment frees the vehicle
+- trips-service: start sample end flow, geofence breach event, samples on an ended trip are 409, distance accumulates across samples, max speed is tracked
+- geo: zero distance for same point, Kigali to Butare is ~133 km, geofence Contains with inside and outside points
+- alerts-worker: overspeed warning vs critical by threshold, missing vehicle id rejected, bad JSON rejected
 
 ## Deploy
 
@@ -68,23 +93,35 @@ GitOps with Argo CD:
 kubectl apply -f deploy/argocd/application.yaml
 ```
 
-Staging is auto-synced with prune and self-heal. Production is manual: promote by bumping the image tag in the production overlay and merging to `main`.
+Staging is auto-synced with prune and self-heal. Production is manual. Promote a tag by updating `deploy/k8s/overlays/production/kustomization.yaml` and merging to `main`.
+
+## Observability
+
+Every pod exposes `/metrics` in Prometheus text format and carries the `prometheus.io/scrape` annotation. The Grafana dashboard at `observability/grafana/fleetpulse-dashboard.json` includes:
+
+- request rate per service
+- alerts produced per minute by severity
+- p95 HTTP latency per service
+- active over-limit alerts in the last 5 minutes
+
+## Load testing
+
+`scripts/k6/smoke.js` drives real traffic through the whole system: register vehicle, register driver, assign, start trip, 5 GPS samples, end trip. Thresholds fail the run if more than 1 % of requests fail or p95 latency goes above 200 ms.
 
 ## CI/CD
 
 `ci.yml` runs on every PR:
-- `go vet`, `go test -race` for each service
+- `go vet`, `go test -race` for each of the four services
 - `kubeconform` against both overlays
 - `helm lint` on the chart
 
 `build-and-push.yml` runs on `main`:
 - builds each service with Buildx
-- tags images with the commit SHA
-- pushes to `ghcr.io/mugishajc/fleetpulse-<service>`
+- pushes to `ghcr.io/mugishajc/fleetpulse-<service>` tagged with the commit SHA
 
 ## Design notes
 
-- NATS over HTTP between services. A vehicle can be registered while the alerts worker is down; it will see the event later. HTTP would couple their uptimes.
-- Queue-group subscription on `alerts-workers`, so scaling the worker to N replicas does not cause N copies of every alert.
-- `/metrics`, `/healthz` and `/readyz` on every Pod. Readiness gates a Pod out of the Service while startup is still in progress.
-- Non-root containers, read-only root filesystem, dropped capabilities, resource requests and limits on every workload.
+- Each service owns its data. No cross-service database reads.
+- Non-root containers, read-only root filesystem, `drop: [ALL]` capabilities, resource requests and limits on every workload.
+- Queue-group NATS subscriptions, not fanout, on consumers that scale horizontally.
+- `/metrics`, `/healthz`, `/readyz` on every pod; readiness gates the Service while startup is still in progress.
