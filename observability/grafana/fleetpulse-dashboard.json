@@ -1,0 +1,44 @@
+{
+  "title": "fleetpulse",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate by service",
+      "targets": [
+        { "expr": "sum by (job) (rate(http_requests_total[1m]))", "legendFormat": "{{job}}" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Alerts produced per minute",
+      "targets": [
+        { "expr": "sum by (severity) (rate(fleet_alerts_total[1m]))", "legendFormat": "{{severity}}" }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active over-limit alerts (last 5m)",
+      "targets": [
+        { "expr": "sum(increase(fleet_alerts_total[5m]))", "legendFormat": "alerts" }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 6 }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "p95 HTTP latency",
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, job) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{job}}" }
+      ],
+      "gridPos": { "x": 8, "y": 8, "w": 16, "h": 6 }
+    }
+  ]
+}
