@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fleetpulse-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mugishajc/fleetpulse.git
+    targetRevision: main
+    path: deploy/k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fleetpulse-staging
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fleetpulse-production
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mugishajc/fleetpulse.git
+    targetRevision: main
+    path: deploy/k8s/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fleetpulse-production
+  # Manual sync in prod. Promote only after a clean staging soak.
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
