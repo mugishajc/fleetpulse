@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: fleetpulse-staging
+resources: [../../base]
+images:
+  - name: ghcr.io/mugishajc/fleetpulse-vehicles-api
+    newTag: 0.1.0
+  - name: ghcr.io/mugishajc/fleetpulse-alerts-worker
+    newTag: 0.1.0
+patches:
+  - target: { kind: Deployment, name: vehicles-api }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target: { kind: Deployment, name: alerts-worker }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
