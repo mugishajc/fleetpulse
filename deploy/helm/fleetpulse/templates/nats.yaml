@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+  labels: { app.kubernetes.io/name: nats, {{- include "fleetpulse.labels" . | nindent 4 }} }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: nats } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: nats } }
+    spec:
+      containers:
+        - name: nats
+          image: {{ .Values.nats.image | quote }}
+          args: ["--http_port=8222"]
+          ports:
+            - { containerPort: 4222, name: client }
+            - { containerPort: 8222, name: http }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: nats }
+spec:
+  selector: { app.kubernetes.io/name: nats }
+  ports:
+    - { port: 4222, targetPort: client, name: client }
+    - { port: 8222, targetPort: http,   name: http }

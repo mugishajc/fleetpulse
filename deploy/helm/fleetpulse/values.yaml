@@ -1,0 +1,20 @@
+nats:
+  image: nats:2.10-alpine
+
+vehiclesApi:
+  image:
+    repository: ghcr.io/mugishajc/fleetpulse-vehicles-api
+    tag: "0.1.0"
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+alertsWorker:
+  image:
+    repository: ghcr.io/mugishajc/fleetpulse-alerts-worker
+    tag: "0.1.0"
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
