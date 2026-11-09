@@ -7,4 +7,6 @@ resources:
   - namespace.yaml
   - nats.yaml
   - vehicles-api.yaml
+  - drivers-service.yaml
+  - trips-service.yaml
   - alerts-worker.yaml
