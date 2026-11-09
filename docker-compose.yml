@@ -1,0 +1,21 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    ports: ["4222:4222", "8222:8222"]
+    command: ["--http_port=8222"]
+
+  vehicles-api:
+    build: ./services/vehicles-api
+    depends_on: [nats]
+    environment:
+      NATS_URL: nats://nats:4222
+      HTTP_ADDR: ":8080"
+    ports: ["8080:8080"]
+
+  alerts-worker:
+    build: ./services/alerts-worker
+    depends_on: [nats]
+    environment:
+      NATS_URL: nats://nats:4222
+      METRICS_ADDR: ":9090"
+    ports: ["9090:9090"]
