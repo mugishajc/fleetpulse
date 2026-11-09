@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nats
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: nats } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: nats } }
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          args: ["--http_port=8222"]
+          ports:
+            - { containerPort: 4222, name: client }
+            - { containerPort: 8222, name: http }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+spec:
+  selector: { app.kubernetes.io/name: nats }
+  ports:
+    - { port: 4222, targetPort: client, name: client }
+    - { port: 8222, targetPort: http,   name: http }
