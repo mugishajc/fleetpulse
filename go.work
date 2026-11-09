@@ -3,4 +3,6 @@ go 1.22
 use (
     ./services/vehicles-api
     ./services/alerts-worker
+    ./services/drivers-service
+    ./services/trips-service
 )
