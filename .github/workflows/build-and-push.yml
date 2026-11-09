@@ -12,7 +12,7 @@ jobs:
   images:
     strategy:
       matrix:
-        service: [vehicles-api, alerts-worker]
+        service: [vehicles-api, alerts-worker, drivers-service, trips-service]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

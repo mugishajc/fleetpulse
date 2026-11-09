@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        service: [vehicles-api, alerts-worker]
+        service: [vehicles-api, alerts-worker, drivers-service, trips-service]
     runs-on: ubuntu-latest
     defaults:
       run:
